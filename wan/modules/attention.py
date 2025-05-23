@@ -145,7 +145,8 @@ def attention(
     dtype=torch.bfloat16,
     fa_version=None,
 ):
-    if FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
+    # if FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
+    if False:
         return flash_attention(
             q=q,
             k=k,
@@ -168,8 +169,10 @@ def attention(
             )
         attn_mask = None
 
-        q = q.transpose(1, 2).to(dtype)
-        k = k.transpose(1, 2).to(dtype)
+        # q = q.transpose(1, 2).to(dtype)
+        # k = k.transpose(1, 2).to(dtype)
+        q = q.to(dtype)
+        k = k.to(dtype)
         v = v.transpose(1, 2).to(dtype)
 
         out = torch.nn.functional.scaled_dot_product_attention(

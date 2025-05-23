@@ -1,4 +1,5 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
+import habana_frameworks.torch.core as htcore
 import gc
 import logging
 import math
@@ -164,7 +165,7 @@ class WanT2V:
         if n_prompt == "":
             n_prompt = self.sample_neg_prompt
         seed = seed if seed >= 0 else random.randint(0, sys.maxsize)
-        seed_g = torch.Generator(device=self.device)
+        seed_g = torch.Generator(device="cpu")
         seed_g.manual_seed(seed)
 
         if not self.t5_cpu:
@@ -189,6 +190,9 @@ class WanT2V:
                 device=self.device,
                 generator=seed_g)
         ]
+        print("seed: ", seed)
+        print(noise[0].shape)
+        print(noise[0].mean())
 
         @contextmanager
         def noop_no_sync():
@@ -197,7 +201,8 @@ class WanT2V:
         no_sync = getattr(self.model, 'no_sync', noop_no_sync)
 
         # evaluation mode
-        with amp.autocast(dtype=self.param_dtype), torch.no_grad(), no_sync():
+        # with amp.autocast(dtype=self.param_dtype), torch.no_grad(), no_sync():
+        with torch.autocast(device_type="hpu", dtype=torch.bfloat16, enabled=True):
 
             if sample_solver == 'unipc':
                 sample_scheduler = FlowUniPCMultistepScheduler(
@@ -233,10 +238,16 @@ class WanT2V:
                 timestep = torch.stack(timestep)
 
                 self.model.to(self.device)
+                print("=="*20)
+                print("latent_model_input: ", latent_model_input[0].mean())
                 noise_pred_cond = self.model(
                     latent_model_input, t=timestep, **arg_c)[0]
+                print("=="*20)
+                print("noise_pred_cond: ", noise_pred_cond.mean())
                 noise_pred_uncond = self.model(
                     latent_model_input, t=timestep, **arg_null)[0]
+                print("=="*20)
+                print("noise_pred_uncond: ", noise_pred_uncond.mean())
 
                 noise_pred = noise_pred_uncond + guide_scale * (
                     noise_pred_cond - noise_pred_uncond)
@@ -247,14 +258,24 @@ class WanT2V:
                     latents[0].unsqueeze(0),
                     return_dict=False,
                     generator=seed_g)[0]
+                print("temp_x0.shape: ", temp_x0.shape)
+                print(temp_x0.mean())
+                print(temp_x0)
+                exit()
                 latents = [temp_x0.squeeze(0)]
+                htcore.mark_step()
 
+            print("here?")
             x0 = latents
+            """
             if offload_model:
                 self.model.cpu()
                 torch.cuda.empty_cache()
+            """
             if self.rank == 0:
+                print("self.vae.decode")
                 videos = self.vae.decode(x0)
+        print("or here?")
 
         del noise, latents
         del sample_scheduler
@@ -263,5 +284,7 @@ class WanT2V:
             torch.cuda.synchronize()
         if dist.is_initialized():
             dist.barrier()
+
+        print("there?")
 
         return videos[0] if self.rank == 0 else None

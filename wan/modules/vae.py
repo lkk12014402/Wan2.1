@@ -1,4 +1,5 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
+import habana_frameworks.torch.core as htcore
 import logging
 
 import torch
@@ -551,6 +552,8 @@ class WanVAE_(nn.Module):
             z = z / scale[1] + scale[0]
         iter_ = z.shape[2]
         x = self.conv2(z)
+        print("x: ", x)
+        print("iter_: ", iter_)
         for i in range(iter_):
             self._conv_idx = [0]
             if i == 0:
@@ -564,6 +567,8 @@ class WanVAE_(nn.Module):
                     feat_cache=self._feat_map,
                     feat_idx=self._conv_idx)
                 out = torch.cat([out, out_], 2)
+            print(out.shape)
+            htcore.mark_step()
         self.clear_cache()
         return out
 
@@ -655,9 +660,22 @@ class WanVAE:
             ]
 
     def decode(self, zs):
-        with amp.autocast(dtype=self.dtype):
-            return [
-                self.model.decode(u.unsqueeze(0),
-                                  self.scale).float().clamp_(-1, 1).squeeze(0)
-                for u in zs
-            ]
+        # with amp.autocast(dtype=self.dtype):
+        print(len(zs))
+        with torch.autocast(device_type="hpu", dtype=torch.bfloat16, enabled=True):
+            us = []
+            for u in zs:
+                print(u.shape)
+                t = self.model.decode(u.unsqueeze(0), self.scale).float().clamp_(-1, 1).squeeze(0)
+                us.append(t)
+                htcore.mark_step()
+                print(len(us))
+        return us
+
+        """    
+        return [
+            self.model.decode(u.unsqueeze(0),
+                            self.scale).float().clamp_(-1, 1).squeeze(0)
+            for u in zs
+        ]
+        """
